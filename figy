@@ -1,0 +1,478 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Heart, Droplets, Utensils, Sun, Coffee, CheckCircle2, Settings, RefreshCw, Edit3, Sparkles, Moon, Wand2, Lock, BatteryLow, Zap } from 'lucide-react';
+
+const apiKey = ""; // API Key disediakan oleh environment
+
+// Komponen Maskot Figy
+const FigyMascot = ({ isAnimating, onTalk, dragData, onDragStart, canInteract, currentStep, isRecessive }) => {
+  const messages = isRecessive ? [
+    "Figy juga sedang istirahat...",
+    "Sshh... waktu tenang.",
+    "Jangan paksa dirimu hari ini.",
+    "Mode hemat energi aktif.",
+    "Mari kita tidak melakukan apa-apa dulu."
+  ] : [
+    "Kamu melakukan hal hebat hari ini!",
+    "Istirahat itu produktif juga, lho.",
+    "Figy bangga padamu!",
+    "Satu langkah kecil tetaplah kemajuan.",
+    "Jangan lupa minum air ya, teman.",
+    "Pelan-pelan saja, Figy menunggumu.",
+    "Kamu lebih kuat dari yang kamu kira.",
+    "Sudahkah kamu tersenyum hari ini?",
+    "Figy ada di sini untukmu."
+  ];
+
+  const handleClick = () => {
+    if (!canInteract || dragData.isDragging) return;
+    const randomMsg = messages[Math.floor(Math.random() * messages.length)];
+    onTalk(randomMsg);
+  };
+
+  const isDashboard = currentStep === 'dashboard';
+  const isDraggable = isDashboard && canInteract;
+
+  const style = {
+    position: 'absolute',
+    left: isDashboard 
+      ? `calc(8% + ${dragData.x}px)` 
+      : `calc(50% + ${dragData.x}px)`,
+    top: isDashboard 
+      ? `auto` 
+      : `calc(22% + ${dragData.y}px)`, 
+    bottom: isDashboard ? `calc(5% - ${dragData.y}px)` : 'auto',
+    transform: isDashboard ? 'none' : 'translateX(-50%)',
+    cursor: isDraggable ? (dragData.isDragging ? 'grabbing' : 'grab') : 'default',
+    transition: dragData.isDragging ? 'none' : 'all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)',
+    zIndex: 100,
+    pointerEvents: 'auto',
+    touchAction: 'none',
+    filter: isRecessive ? 'grayscale(0.6) brightness(0.8)' : 'none'
+  };
+
+  return (
+    <div 
+      onMouseDown={isDraggable ? onDragStart : undefined}
+      onTouchStart={isDraggable ? onDragStart : undefined}
+      onClick={handleClick}
+      style={style}
+      className="w-20 h-20 md:w-28 md:h-28 flex items-center justify-center select-none"
+    >
+      <svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-lg">
+        <path d="M70 140 L130 140 L120 180 L80 180 Z" fill={isRecessive ? "#5D4037" : "#8D6E63"} />
+        <g className={isAnimating ? (isRecessive ? "animate-pulse" : "animate-bounce") : ""} style={{ animationDuration: isRecessive ? '6s' : '4s', transformOrigin: 'bottom center' }}>
+          <path d="M100 140 Q105 100 100 70" stroke={isRecessive ? "#388E3C" : "#4CAF50"} strokeWidth="8" fill="none" />
+          <path d="M100 100 Q70 80 80 110" fill={isRecessive ? "#689F38" : "#81C784"} />
+          <path d="M100 90 Q130 70 120 100" fill={isRecessive ? "#2E7D32" : "#43A047"} />
+          <g transform="translate(100, 70)">
+            <circle cx="-10" cy="0" r="2" fill="#333" />
+            <circle cx="10" cy="0" r="2" fill="#333" />
+            <path d={isRecessive ? "M-5 12 Q0 12 5 12" : "M-5 10 Q0 15 5 10"} stroke="#333" fill="none" strokeWidth="1.5" />
+            <circle cx="-15" cy="8" r="3" fill="#FFCDD2" opacity="0.6" />
+            <circle cx="15" cy="8" r="3" fill="#FFCDD2" opacity="0.6" />
+          </g>
+        </g>
+      </svg>
+    </div>
+  );
+};
+
+// Main Application
+export default function App() {
+  const [step, setStep] = useState('welcome'); 
+  const [onboardingIndex, setOnboardingIndex] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
+  const [isDoneConfirm, setIsDoneConfirm] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
+  const [userNote, setUserNote] = useState("");
+  const [dailyHabits, setDailyHabits] = useState([]);
+  const [isLocked, setIsLocked] = useState(false);
+  const [isRecessive, setIsRecessive] = useState(false); // State untuk Mode Resesif
+  
+  const [weeklyHistory, setWeeklyHistory] = useState({
+    "Monday": { done: 0, total: 0 }, "Tuesday": { done: 0, total: 0 },
+    "Wednesday": { done: 0, total: 0 }, "Thursday": { done: 0, total: 0 },
+    "Friday": { done: 0, total: 0 }, "Saturday": { done: 0, total: 0 },
+    "Sunday": { done: 0, total: 0 }
+  });
+
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [figyDrag, setFigyDrag] = useState({ x: 0, y: 0, isDragging: false });
+  const startDragPos = useRef({ x: 0, y: 0 });
+
+  const [userState, setUserState] = useState({
+    name: 'Teman',
+    severity: 2, 
+    habitsCompleted: [],
+    professionalHelp: '',
+    problemDuration: '',
+    severityText: ''
+  });
+
+  const [inputText, setInputText] = useState("");
+
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const currentDayName = days[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+
+  const onboardingQuestions = [
+    { id: 'mood', question: "Bagaimana perasaanmu hari ini?", type: 'choice', options: [
+      { label: "Sangat Baik (Misi Menantang)", value: 1 }, 
+      { label: "Biasa Saja (Misi Sedang)", value: 2 }, 
+      { label: "Cukup Berat (Misi Mudah)", value: 3 }
+    ]},
+    { id: 'duration', question: "Berapa lama kamu sudah mengalami masalah tersebut?", type: 'choice', options: [
+      { label: "Baru-baru ini", value: 'recent' }, { label: "Beberapa bulan", value: 'months' }, { label: "Sudah lama", value: 'years' }
+    ]},
+    { id: 'severityText', question: "Seberapa beratkah masalah kamu?", type: 'textarea', placeholder: "Ceritakan sedikit seberapa berat bebanmu..." },
+    { id: 'professional', question: "Apakah kamu sudah mencari bantuan profesional?", type: 'choice', options: [
+      { label: "Sudah", value: 'yes' }, { label: "Belum", value: 'no' }, { label: "Sedang merencanakan", value: 'planning' }
+    ]},
+    { id: 'name', question: "Terakhir, siapa namamu?", type: 'text', placeholder: "Nama panggilanmu..." }
+  ];
+
+  const habitPool = {
+    easy: [
+      { id: 'water', label: 'Minum air putih', icon: <Droplets className="text-blue-400" /> },
+      { id: 'breathe', label: 'Ambil napas lega', icon: <RefreshCw className="text-teal-400" /> },
+      { id: 'stretch', label: 'Peregangan leher', icon: <Sparkles className="text-yellow-400" /> },
+      { id: 'sit', label: 'Duduk tegak 1 menit', icon: <Sun className="text-orange-400" /> },
+      { id: 'look_away', label: 'Lihat jauh 20 detik', icon: <Sun className="text-green-400" /> }
+    ],
+    medium: [
+      { id: 'wash', label: 'Cuci muka', icon: <Coffee className="text-purple-400" /> },
+      { id: 'bed', label: 'Rapikan bantal', icon: <Moon className="text-indigo-400" /> },
+      { id: 'fruit', label: 'Makan buah/snack', icon: <Utensils className="text-red-400" /> },
+      { id: 'window', label: 'Buka jendela sebentar', icon: <Sun className="text-yellow-600" /> },
+      { id: 'music', label: 'Dengar 1 lagu tenang', icon: <Heart className="text-pink-400" /> }
+    ],
+    challenge: [
+      { id: 'walk', label: 'Jalan kaki di ruangan', icon: <CheckCircle2 className="text-green-400" /> },
+      { id: 'journal', label: 'Tulis satu kata hari ini', icon: <Edit3 className="text-stone-400" /> },
+      { id: 'shower', label: 'Mandi air hangat', icon: <Droplets className="text-blue-600" /> },
+      { id: 'clean', label: 'Rapikan satu meja', icon: <Sparkles className="text-blue-300" /> },
+      { id: 'read', label: 'Baca 2 halaman buku', icon: <Edit3 className="text-orange-400" /> }
+    ]
+  };
+
+  useEffect(() => {
+    if (step === 'dashboard') {
+      const missions = userState.severity === 3 ? [...habitPool.easy].sort(() => 0.5 - Math.random()).slice(0, 4) :
+                       userState.severity === 1 ? [...habitPool.medium.sort(() => 0.5 - Math.random()).slice(0, 2), ...habitPool.challenge.sort(() => 0.5 - Math.random()).slice(0, 3)] :
+                       [...habitPool.easy.sort(() => 0.5 - Math.random()).slice(0, 2), ...habitPool.medium.sort(() => 0.5 - Math.random()).slice(0, 2), ...habitPool.challenge.sort(() => 0.5 - Math.random()).slice(0, 1)];
+      setDailyHabits(missions);
+    }
+  }, [step, userState.severity]);
+
+  const handleDragStart = (e) => {
+    const clientX = (e.touches ? e.touches[0].clientX : e.clientX);
+    const clientY = (e.touches ? e.touches[0].clientY : e.clientY);
+    startDragPos.current = { x: clientX - figyDrag.x, y: clientY - figyDrag.y };
+    setFigyDrag(prev => ({ ...prev, isDragging: true }));
+  };
+
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!figyDrag.isDragging) return;
+      const clientX = (e.touches ? e.touches[0].clientX : e.clientX);
+      const clientY = (e.touches ? e.touches[0].clientY : e.clientY);
+      setFigyDrag(prev => ({ 
+        ...prev, 
+        x: clientX - startDragPos.current.x, 
+        y: clientY - startDragPos.current.y 
+      }));
+    };
+    const handleEnd = () => { 
+      if (figyDrag.isDragging) setFigyDrag({ x: 0, y: 0, isDragging: false });
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleMove);
+    window.addEventListener('touchend', handleEnd);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+  }, [figyDrag.isDragging]);
+
+  const handleNextOnboarding = () => {
+    const currentQ = onboardingQuestions[onboardingIndex];
+    if (currentQ.id === 'name') setUserState(prev => ({...prev, name: inputText || 'Teman'}));
+    else if (currentQ.id === 'severityText') setUserState(prev => ({...prev, severityText: inputText}));
+
+    if (onboardingIndex < onboardingQuestions.length - 1) {
+      setOnboardingIndex(onboardingIndex + 1);
+      setInputText("");
+    } else {
+      setStep('dashboard');
+      setFigyDrag({ x: 0, y: 0, isDragging: false });
+    }
+  };
+
+  const triggerToast = (msg) => {
+    setToastMsg(msg);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  const rewriteNoteWithAi = async () => {
+    if (!userNote) return;
+    setIsAiLoading(true);
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: userNote }] }],
+          systemInstruction: { parts: [{ text: "Tulis ulang catatan ini menjadi kalimat afirmasi positif yang singkat dan lembut." }] }
+        })
+      });
+      const data = await response.json();
+      setUserNote(data.candidates?.[0]?.content?.parts?.[0]?.text);
+      triggerToast("Catatanmu dipercantik ✨");
+    } catch (e) { triggerToast("Gagal memproses AI"); }
+    finally { setIsAiLoading(false); }
+  };
+
+  const handleFinalize = () => {
+    const done = userState.habitsCompleted.length;
+    const total = dailyHabits.length;
+    setWeeklyHistory(prev => ({ ...prev, [currentDayName]: { done, total } }));
+    setIsLocked(true);
+    setIsDoneConfirm(false);
+    triggerToast("Hari terkunci. Sampai jumpa besok! 🌿");
+  };
+
+  const getDayColor = (dayName) => {
+    const data = weeklyHistory[dayName];
+    if (!data || data.total === 0) return 'text-stone-300';
+    if (data.done === data.total) return 'text-green-500 font-black';
+    if (data.done > 0) return 'text-yellow-500 font-bold';
+    return 'text-stone-400';
+  };
+
+  return (
+    <div className="min-h-screen bg-stone-100 text-stone-800 font-sans p-2 md:p-4 flex flex-col items-center justify-center overflow-auto relative">
+      
+      <div className={`max-w-4xl w-full bg-white rounded-[2.5rem] shadow-2xl border border-stone-200 flex flex-col md:flex-row h-auto md:h-[700px] min-h-[85vh] relative overflow-hidden transition-colors duration-1000 ${isRecessive ? 'bg-stone-50' : 'bg-white'}`}>
+        
+        {/* Mascot */}
+        <FigyMascot 
+          isAnimating={true} 
+          onTalk={triggerToast} 
+          dragData={figyDrag} 
+          onDragStart={handleDragStart} 
+          canInteract={true}
+          currentStep={step}
+          isRecessive={isRecessive}
+        />
+
+        {/* ONBOARDING */}
+        {(step === 'welcome' || step === 'assessment') && (
+          <div className="w-full flex flex-col items-center justify-center p-8 text-center space-y-6 animate-in fade-in slide-in-from-bottom-5 overflow-y-auto relative z-10">
+            <div className="h-48 shrink-0" /> 
+            
+            <div className="bg-stone-50 p-6 rounded-3xl border border-stone-100 max-w-sm shadow-inner relative z-0">
+              <p className="text-lg font-medium text-stone-600 leading-relaxed">
+                {step === 'welcome' ? "Halo! Aku Figy. Mari kita mengobrol sebentar sebelum mulai." : onboardingQuestions[onboardingIndex].question}
+              </p>
+            </div>
+            <div className="max-w-sm w-full space-y-4 pb-12 relative z-10">
+              {step === 'welcome' ? (
+                <button onClick={() => setStep('assessment')} className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-green-600 active:scale-95 transition-all">Ayo Ngobrol</button>
+              ) : (
+                <div className="space-y-3">
+                  {onboardingQuestions[onboardingIndex].type === 'choice' ? (
+                    <div className="grid gap-2">
+                      {onboardingQuestions[onboardingIndex].options.map((opt, i) => (
+                        <button key={i} onClick={() => { 
+                          if(onboardingQuestions[onboardingIndex].id === 'mood') setUserState(p => ({...p, severity: opt.value}));
+                          handleNextOnboarding(); 
+                        }} className="w-full p-4 bg-white border border-stone-200 rounded-2xl hover:border-green-400 hover:bg-green-50 text-xs font-bold transition-all active:scale-95">{opt.label}</button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {onboardingQuestions[onboardingIndex].type === 'textarea' ? (
+                        <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={onboardingQuestions[onboardingIndex].placeholder} className="w-full p-4 bg-stone-50 rounded-2xl border-none text-sm h-32 resize-none outline-none focus:ring-2 focus:ring-green-100" />
+                      ) : (
+                        <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={onboardingQuestions[onboardingIndex].placeholder} className="w-full p-4 bg-stone-50 rounded-2xl border-none text-center outline-none focus:ring-2 focus:ring-green-100" />
+                      )}
+                      <button onClick={handleNextOnboarding} className="w-full bg-stone-800 text-white py-4 rounded-2xl font-bold active:scale-95 transition-all">Lanjut</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* DASHBOARD */}
+        {step === 'dashboard' && (
+          <>
+            <div className={`w-full md:w-1/3 border-r border-stone-100 p-6 pt-16 md:pt-20 flex flex-col relative z-20 h-auto md:h-full overflow-y-auto custom-scrollbar transition-colors ${isRecessive ? 'bg-stone-200/50' : 'bg-stone-50'}`}>
+              <div className="space-y-8 h-full flex flex-col">
+                <div>
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-stone-400 mb-4">Progres Mingguan</h3>
+                  <div className="space-y-2">
+                    {days.map((day) => (
+                      <div key={day} className={`flex items-center gap-3 text-sm transition-all duration-500 ${getDayColor(day)}`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${day === currentDayName ? 'bg-current animate-pulse' : 'bg-current opacity-40'}`} />
+                        <span>{day}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* AREA NOTES */}
+                <div className="bg-white p-4 rounded-3xl shadow-sm border border-stone-100 relative h-72 flex flex-col group overflow-hidden">
+                  <div className="flex items-center justify-between mb-3 text-stone-400 shrink-0 relative z-10">
+                    <span className="text-[9px] font-black uppercase tracking-widest">Catatan Diriku</span>
+                    {!isLocked && !isRecessive && userNote && (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); rewriteNoteWithAi(); }} 
+                        disabled={isAiLoading} 
+                        className="text-orange-400 hover:scale-110 transition-transform p-1"
+                      >
+                        <Wand2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="flex-grow w-full relative z-30">
+                    <textarea 
+                      value={userNote}
+                      onChange={(e) => setUserNote(e.target.value)}
+                      readOnly={isLocked || isRecessive}
+                      placeholder={isLocked ? "Hari ini sudah selesai." : isRecessive ? "Mode istirahat aktif..." : "Tuliskan apa saja yang kamu rasakan..."}
+                      className="w-full h-full text-xs bg-transparent border-none focus:ring-0 resize-none italic text-stone-600 p-0 overflow-y-auto custom-scrollbar leading-relaxed outline-none pointer-events-auto"
+                      style={{ 
+                        WebkitAppearance: 'none',
+                        display: 'block'
+                      }}
+                    />
+                  </div>
+                  
+                  {isAiLoading && <div className="absolute inset-0 bg-white/60 flex items-center justify-center rounded-3xl animate-pulse z-40"><Sparkles className="text-orange-400" /></div>}
+                </div>
+                
+                <div className="flex-grow min-h-[140px]" />
+              </div>
+            </div>
+
+            <div className="w-full md:w-2/3 p-6 md:p-10 flex flex-col bg-white z-10 relative h-full">
+              <div className="flex justify-between items-start mb-8 shrink-0 relative z-50">
+                <div>
+                  <h1 className="text-3xl font-black text-stone-800 flex items-center gap-3">
+                    Halo, {userState.name}! {isLocked && <Lock size={24} className="text-stone-300" />}
+                  </h1>
+                  <p className="text-stone-400 text-sm font-medium">
+                    {isRecessive ? "Waktunya jeda sejenak. Figy menunggumu kembali saat siap." : isLocked ? "Misi hari ini sudah selesai. Kamu luar biasa!" : "Ayo lakukan misi kecil ini bersama Figy."}
+                  </p>
+                </div>
+                <button onClick={() => setShowSettings(true)} className="p-3 bg-stone-50 rounded-2xl text-stone-400 hover:bg-stone-100 active:scale-90 transition-all"><Settings size={20} /></button>
+              </div>
+
+              <div className="flex-grow space-y-3 overflow-y-auto pr-2 custom-scrollbar">
+                {isRecessive ? (
+                  <div className="flex flex-col items-center justify-center h-full text-center p-10 space-y-4">
+                    <div className="p-6 bg-stone-50 rounded-full text-stone-300">
+                      <Moon size={64} className="animate-pulse" />
+                    </div>
+                    <h2 className="text-xl font-bold text-stone-500">Mode Resesif Aktif</h2>
+                    <p className="text-stone-400 text-sm max-w-xs">Semua misi disembunyikan agar kamu bisa fokus beristirahat. Klik ikon Gear untuk kembali.</p>
+                  </div>
+                ) : (
+                  dailyHabits.map((habit) => (
+                    <div 
+                      key={habit.id} 
+                      onClick={() => {
+                        if (isLocked) return;
+                        const isComp = userState.habitsCompleted.includes(habit.id);
+                        setUserState(prev => ({ ...prev, habitsCompleted: isComp ? prev.habitsCompleted.filter(id => id !== habit.id) : [...prev.habitsCompleted, habit.id] }));
+                        if (!isComp) triggerToast("Hebat!");
+                      }} 
+                      className={`group flex items-center gap-4 p-5 rounded-[1.8rem] border transition-all ${isLocked ? 'cursor-default opacity-80' : 'cursor-pointer active:scale-[0.98]'} ${userState.habitsCompleted.includes(habit.id) ? 'bg-stone-50 border-stone-100' : 'bg-white border-stone-100 hover:border-green-200'}`}
+                    >
+                      <div className={`p-3 rounded-2xl transition-all ${userState.habitsCompleted.includes(habit.id) ? 'bg-stone-200 text-stone-400' : 'bg-green-50 text-green-500'}`}>{habit.icon}</div>
+                      <span className={`flex-grow font-bold text-sm ${userState.habitsCompleted.includes(habit.id) ? 'text-stone-300 line-through' : 'text-stone-600'}`}>{habit.label}</span>
+                      <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center ${userState.habitsCompleted.includes(habit.id) ? 'bg-green-500 border-green-500' : 'border-stone-100'}`}>
+                        {userState.habitsCompleted.includes(habit.id) && <CheckCircle2 size={16} className="text-white" />}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {!isRecessive && (
+                <div className="mt-8 shrink-0 relative z-20">
+                  {!isLocked ? (
+                    <button onClick={() => { if(isDoneConfirm) handleFinalize(); else setIsDoneConfirm(true); }} className={`w-full py-5 rounded-[1.5rem] font-black text-xs uppercase tracking-widest transition-all ${isDoneConfirm ? 'bg-orange-500 text-white animate-pulse' : 'bg-stone-900 text-white shadow-xl shadow-stone-200 active:scale-95'}`}>
+                      {isDoneConfirm ? "Sudah Yakin? (Akan Mengunci Hari)" : "Selesaikan Hari Ini"}
+                    </button>
+                  ) : (
+                    <div className="text-center p-5 bg-stone-50 rounded-[1.5rem] text-stone-400 font-bold text-xs uppercase tracking-widest border border-dashed border-stone-200">
+                      Selesai untuk hari {currentDayName} ✨
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* SETTINGS OVERLAY */}
+        {showSettings && (
+          <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-md z-[200] p-6 flex items-center justify-center">
+            <div className="max-w-sm w-full bg-white p-8 rounded-[2.5rem] shadow-2xl space-y-6 animate-in zoom-in-95">
+              <h2 className="text-xl font-black text-stone-800 text-center">Pengaturan</h2>
+              
+              <div className="space-y-4">
+                {/* Toggle Mode Resesif */}
+                <div className="flex items-center justify-between p-4 bg-stone-50 rounded-2xl border border-stone-100">
+                  <div className="flex items-center gap-3">
+                    <BatteryLow className={isRecessive ? "text-orange-500" : "text-stone-400"} size={20} />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-stone-700">Mode Resesif</span>
+                      <span className="text-[10px] text-stone-400">Istirahat tanpa misi</span>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setIsRecessive(!isRecessive)} 
+                    className={`w-12 h-6 rounded-full transition-all relative ${isRecessive ? 'bg-orange-500' : 'bg-stone-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isRecessive ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <button onClick={() => {setStep('welcome'); setIsLocked(false); setOnboardingIndex(0); setShowSettings(false); setFigyDrag({x:0, y:0, isDragging:false}); setIsRecessive(false);}} className="w-full bg-stone-100 text-stone-600 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-stone-200 transition-all">
+                  <RefreshCw size={18}/> Reset Aplikasi
+                </button>
+              </div>
+
+              <button onClick={() => setShowSettings(false)} className="w-full bg-stone-800 text-white py-4 rounded-2xl font-bold hover:bg-stone-700 transition-all">Tutup</button>
+            </div>
+          </div>
+        )}
+
+        {/* TOAST */}
+        {showToast && (
+          <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-stone-900 text-white px-8 py-3 rounded-full shadow-2xl z-[300] animate-in slide-in-from-bottom-10 flex items-center gap-3">
+            <span className="text-[11px] font-black uppercase tracking-widest">{toastMsg}</span>
+          </div>
+        )}
+      </div>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e7e5e4; border-radius: 10px; }
+        textarea:focus { outline: none !important; border: none !important; box-shadow: none !important; }
+        body { margin: 0; padding: 0; }
+        @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      `}} />
+    </div>
+  );
+}
